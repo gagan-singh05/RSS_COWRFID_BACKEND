@@ -59,7 +59,7 @@ WSGI_APPLICATION = "config.wsgi.application"
 # ---------- DATABASE (Supabase) ----------
 DATABASES = {
     "default": dj_database_url.parse(
-        "postgresql://postgres.afmbxegcsdhiqjgmzfuj:RSS@DAYALBAGH@aws-1-ap-south-1.pooler.supabase.com:6543/postgres",
+        "postgresql://postgres.hmuiicwminrqizxukyiw:rssdairy_db@aws-1-ap-southeast-1.pooler.supabase.com:6543/postgres",
         conn_max_age=0, 
         ssl_require=True
     )
