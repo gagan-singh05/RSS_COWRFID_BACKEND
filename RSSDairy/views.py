@@ -72,7 +72,25 @@ class RfidScanListCreate(generics.ListCreateAPIView):
         instance = RfidScan.objects.filter(uid=uid).first() if uid else None
         serializer = self.get_serializer(instance=instance, data=request.data)
         serializer.is_valid(raise_exception=True)
-        obj = serializer.save()
+
+        # Determine block from name mapping: 'desh' -> 'A', 'bholu' -> 'B'
+        name_val = serializer.validated_data.get("name") or request.data.get("name")
+        block_override = None
+        if name_val:
+            try:
+                name_clean = str(name_val).strip().lower()
+            except Exception:
+                name_clean = ""
+            if name_clean == "desh":
+                block_override = "A"
+            elif name_clean == "bholu":
+                block_override = "B"
+
+        # If we determined a block, pass it to save() to enforce the mapping.
+        if block_override is not None:
+            obj = serializer.save(block=block_override)
+        else:
+            obj = serializer.save()
         out = RfidScanSerializer(obj).data
         try:
             broadcaster.publish(out)
