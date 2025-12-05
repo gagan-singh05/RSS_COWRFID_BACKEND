@@ -1,5 +1,5 @@
 from django.urls import path
-from RSSDairy.views import RfidScanListCreate, RfidScanDetail
+from RSSDairy.views import RfidScanListCreate, RfidScanDetail, MissingCowsView
 from RSSDairy.sse import stream_scans
 
 urlpatterns = [
