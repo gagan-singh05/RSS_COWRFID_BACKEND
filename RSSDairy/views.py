@@ -183,3 +183,64 @@ class MissingCowsView(APIView):
                 "missing_cows": missing,
             }
         )
+
+
+
+class AttendanceSummaryView(APIView):
+    """
+    GET /api/attendance-summary/?date=YYYY-MM-DD   (date optional; default today)
+
+    Returns, for each cow that has any scan that day:
+      - total_scans
+      - out_scans
+      - in_scans
+      - outside (True/False)
+    """
+
+    permission_classes = [AllowAny]
+
+    def get(self, request, *args, **kwargs):
+        date_str = request.query_params.get("date")
+        if date_str:
+            date_obj = parse_date(date_str)
+        else:
+            date_obj = datetime.now().date()
+
+        if not date_obj:
+            return Response({"error": "Invalid date parameter"}, status=400)
+
+        # Aggregate per uid/name
+        base_qs = RfidScan.objects.filter(date=date_obj)
+
+        agg = (
+            base_qs.values("uid", "name")
+            .annotate(
+                total_scans=Count("id"),
+                out_scans=Count("id", filter=Q(direction="OUT")),
+                in_scans=Count("id", filter=Q(direction="IN")),
+            )
+            .order_by("name", "uid")
+        )
+
+        results = []
+        for row in agg:
+            # A simple rule: if OUT scans > IN scans → cow is still outside
+            outside = row["out_scans"] > row["in_scans"]
+            results.append(
+                {
+                    "uid": row["uid"],
+                    "name": row["name"],
+                    "total_scans": row["total_scans"],
+                    "out_scans": row["out_scans"],
+                    "in_scans": row["in_scans"],
+                    "outside": outside,
+                }
+            )
+
+        return Response(
+            {
+                "date": date_obj,
+                "count": len(results),
+                "attendance": results,
+            }
+        )
