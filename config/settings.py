@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 import dj_database_url
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -56,14 +57,29 @@ TEMPLATES = [{
 
 WSGI_APPLICATION = "config.wsgi.application"
 
-# ---------- DATABASE (Supabase) ----------
-DATABASES = {
-    "default": dj_database_url.parse(
-        "postgresql://postgres.hmuiicwminrqizxukyiw:rssdairy_db@aws-1-ap-southeast-1.pooler.supabase.com:6543/postgres",
-        conn_max_age=0, 
-        ssl_require=True
-    )
-}
+# ---------- DATABASE ----------
+# Prefer an explicit DATABASE_URL environment variable (useful for deployment),
+# otherwise use a local sqlite file if present (convenient for local development),
+# and fall back to the Supabase Postgres URL defined by the project.
+db_env_url = os.environ.get("DATABASE_URL")
+sqlite_path = BASE_DIR / "db.sqlite3"
+if db_env_url:
+    DATABASES = {"default": dj_database_url.parse(db_env_url, conn_max_age=0, ssl_require=False)}
+elif sqlite_path.exists():
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": str(sqlite_path),
+        }
+    }
+else:
+    DATABASES = {
+        "default": dj_database_url.parse(
+            "postgresql://postgres.hmuiicwminrqizxukyiw:rssdairy_db@aws-1-ap-southeast-1.pooler.supabase.com:6543/postgres",
+            conn_max_age=0,
+            ssl_require=True,
+        )
+    }
 
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"
