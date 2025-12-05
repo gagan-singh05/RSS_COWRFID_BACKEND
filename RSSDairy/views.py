@@ -51,13 +51,15 @@
 from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
+from rest_framework.views import APIView
 from django.utils.dateparse import parse_date
 from django.db.models import Count
+from datetime import datetime
+
 from .models import RfidScan
 from .serializers import RfidScanSerializer
 from RSSDairy.sse import broadcaster
-from datetime import datetime
-from rest_framework.views import APIView
+
 
 
 class RfidScanListCreate(generics.ListCreateAPIView):
@@ -138,6 +140,7 @@ class RfidScanDetail(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = RfidScanSerializer
     authentication_classes: list = []
     permission_classes = [AllowAny]
+
 class MissingCowsView(APIView):
     """
     GET /api/missing-cows/?date=2025-12-05  (date optional, defaults to today)
