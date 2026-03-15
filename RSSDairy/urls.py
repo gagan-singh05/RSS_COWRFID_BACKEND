@@ -1,5 +1,9 @@
 from django.urls import path
-from RSSDairy.views import RfidScanListCreate, RfidScanDetail, MissingCowsView, AttendanceSummaryView
+from RSSDairy.views import (
+    RfidScanListCreate, RfidScanDetail, 
+    MissingCowsView, AttendanceSummaryView,
+    BlockListCreate, CowListCreate, SessionControlView
+)
 from RSSDairy.sse import stream_scans
 
 urlpatterns = [
@@ -8,4 +12,7 @@ urlpatterns = [
     path('stream/', stream_scans, name='rfidscan-stream'),
     path("missing-cows/", MissingCowsView.as_view(), name="missing-cows"),
     path("attendance-summary/", AttendanceSummaryView.as_view(), name="attendance-summary"),
+    path("blocks/", BlockListCreate.as_view(), name="block-list"),
+    path("cows/", CowListCreate.as_view(), name="cow-list"),
+    path("session/", SessionControlView.as_view(), name="session-control"),
 ]

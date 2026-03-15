@@ -56,11 +56,65 @@ from django.utils.dateparse import parse_date
 from django.db.models import Count
 from datetime import datetime
 
-from .models import RfidScan
-from .serializers import RfidScanSerializer
+from .models import RfidScan, Block, Cow, ScanSession
+from .serializers import RfidScanSerializer, BlockSerializer, CowSerializer
 from RSSDairy.sse import broadcaster
 
+class SessionControlView(APIView):
+    permission_classes = [AllowAny]
 
+    def get(self, request):
+        # Return current active session info
+        session = ScanSession.objects.filter(is_active=True).last()
+        if session:
+            return Response({
+                "is_active": True, 
+                "block": session.active_block.name,
+                "start_time": session.start_time
+            })
+        return Response({"is_active": False, "block": None})
+
+    def post(self, request):
+        action = request.data.get("action") # "start" or "stop"
+        block_name = request.data.get("block")
+        
+        if action == "stop":
+            ScanSession.objects.filter(is_active=True).update(is_active=False)
+            return Response({"message": "Session stopped"})
+            
+        elif action == "start":
+            if not block_name:
+                return Response({"error": "Block name required"}, status=400)
+            
+            # Stop any old ones
+            ScanSession.objects.filter(is_active=True).update(is_active=False)
+            
+            block_obj, _ = Block.objects.get_or_create(name=block_name)
+            ScanSession.objects.create(active_block=block_obj, is_active=True)
+            return Response({"message": f"Session started for {block_name}"})
+            
+        return Response({"error": "Invalid action"}, status=400)
+
+
+class BlockListCreate(generics.ListCreateAPIView):
+    queryset = Block.objects.all()
+    serializer_class = BlockSerializer
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+class CowListCreate(generics.ListCreateAPIView):
+    queryset = Cow.objects.all()
+    serializer_class = CowSerializer
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    
+    def create(self, request, *args, **kwargs):
+        if isinstance(request.data, list):
+            serializer = self.get_serializer(data=request.data, many=True)
+            serializer.is_valid(raise_exception=True)
+            self.perform_create(serializer)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return super().create(request, *args, **kwargs)
 
 class RfidScanListCreate(generics.ListCreateAPIView):
     serializer_class = RfidScanSerializer
@@ -69,6 +123,15 @@ class RfidScanListCreate(generics.ListCreateAPIView):
     permission_classes = [AllowAny]
 
     def create(self, request, *args, **kwargs):
+        # --- SESSION CHECK ---
+        active_session = ScanSession.objects.filter(is_active=True).last()
+        if not active_session:
+            # IGNORE SCAN Logic
+            return Response({"message": "Scan ignored (No active session)"}, status=status.HTTP_200_OK)
+        
+        # Override any client-provided block with the ACTIVE one
+        current_block_name = active_session.active_block.name
+        
         uid = request.data.get("uid")
         if not uid:
             return Response({"error": "uid is required"}, status=status.HTTP_400_BAD_REQUEST)
@@ -90,37 +153,32 @@ class RfidScanListCreate(generics.ListCreateAPIView):
         )
 
         if last_scan is None or last_scan.date != date_obj:
-            # First scan ever OR first scan of the day → assume cow was inside, now going OUT
             direction = "OUT"
         else:
-            # Alternate: OUT → IN → OUT → IN ...
             direction = "IN" if last_scan.direction == "OUT" else "OUT"
 
         # Validate other fields with serializer
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        # Keep your name → block mapping
-        name_val = serializer.validated_data.get("name") or request.data.get("name")
-        block_override = None
-        if name_val:
-            try:
-                name_clean = str(name_val).strip().lower()
-            except Exception:
-                name_clean = ""
-            if name_clean == "desh":
-                block_override = "A"
-            elif name_clean == "bholu":
-                block_override = "B"
+        block_obj = active_session.active_block
+        
+        # Sync with Master Cow List
+        name_val = serializer.validated_data.get("name") or request.data.get("name") or "Unknown"
+        cow_obj, _ = Cow.objects.get_or_create(uid=uid, defaults={"name": name_val})
+        
+        # Update Master Cow Status
+        cow_obj.last_seen_block = block_obj
+        cow_obj.last_seen_time = datetime.combine(date_obj, time_obj)
+        cow_obj.save()
 
         save_kwargs = {
             "uid": uid,
             "date": date_obj,
             "time": time_obj,
             "direction": direction,
+            "block": block_obj.name # Force the active block
         }
-        if block_override is not None:
-            save_kwargs["block"] = block_override
 
         # Always create a NEW row (no instance=instance)
         obj = serializer.save(**save_kwargs)
