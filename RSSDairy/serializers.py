@@ -12,6 +12,10 @@ class CowSerializer(serializers.ModelSerializer):
         fields = "__all__"
 
 class RfidScanSerializer(serializers.ModelSerializer):
+    name = serializers.CharField(required=False, default='Unknown')
+    block = serializers.CharField(required=False, default='')
+    direction = serializers.CharField(required=False, default='OUT')
+
     class Meta:
         model = RfidScan
         fields = "__all__"
