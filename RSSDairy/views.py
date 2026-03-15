@@ -53,8 +53,9 @@ from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
 from rest_framework.views import APIView
 from django.utils.dateparse import parse_date
-from django.db.models import Count
+from django.db.models import Count, Q
 from datetime import datetime
+from django.utils import timezone
 
 from .models import RfidScan, Block, Cow, ScanSession
 from .serializers import RfidScanSerializer, BlockSerializer, CowSerializer
@@ -173,7 +174,8 @@ class RfidScanListCreate(generics.ListCreateAPIView):
         
         # Update Master Cow Status
         cow_obj.last_seen_block = block_obj
-        cow_obj.last_seen_time = datetime.combine(date_obj, time_obj)
+        naive_dt = datetime.combine(date_obj, time_obj)
+        cow_obj.last_seen_time = timezone.make_aware(naive_dt)
         cow_obj.save()
 
         save_kwargs = {
@@ -218,7 +220,7 @@ class MissingCowsView(APIView):
         if date_str:
             date_obj = parse_date(date_str)
         else:
-            date_obj = datetime.now().date()
+            date_obj = timezone.localdate()
 
         if not date_obj:
             return Response({"error": "Invalid date parameter"}, status=status.HTTP_400_BAD_REQUEST)
@@ -267,7 +269,7 @@ class AttendanceSummaryView(APIView):
         if date_str:
             date_obj = parse_date(date_str)
         else:
-            date_obj = datetime.now().date()
+            date_obj = timezone.localdate()
 
         if not date_obj:
             return Response({"error": "Invalid date parameter"}, status=400)
