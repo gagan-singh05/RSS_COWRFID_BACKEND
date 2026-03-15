@@ -64,35 +64,37 @@ class SessionControlView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request):
-        # Return current active session info
         session = ScanSession.objects.filter(is_active=True).last()
         if session:
-            return Response({
-                "is_active": True, 
+            data = {
+                "is_active": True,
                 "block": session.active_block.name,
-                "start_time": session.start_time
-            })
+                "start_time": str(session.start_time)
+            }
+            print(f"[SESSION GET] Active session: {data}", flush=True)
+            return Response(data)
+        print("[SESSION GET] No active session", flush=True)
         return Response({"is_active": False, "block": None})
 
     def post(self, request):
-        action = request.data.get("action") # "start" or "stop"
+        action = request.data.get("action")
         block_name = request.data.get("block")
-        
+        print(f"[SESSION POST] action={action} block={block_name} body={request.data}", flush=True)
+
         if action == "stop":
             ScanSession.objects.filter(is_active=True).update(is_active=False)
+            print("[SESSION POST] Session stopped", flush=True)
             return Response({"message": "Session stopped"})
-            
+
         elif action == "start":
             if not block_name:
                 return Response({"error": "Block name required"}, status=400)
-            
-            # Stop any old ones
             ScanSession.objects.filter(is_active=True).update(is_active=False)
-            
             block_obj, _ = Block.objects.get_or_create(name=block_name)
             ScanSession.objects.create(active_block=block_obj, is_active=True)
+            print(f"[SESSION POST] Session started for block={block_name}", flush=True)
             return Response({"message": f"Session started for {block_name}"})
-            
+
         return Response({"error": "Invalid action"}, status=400)
 
 
@@ -123,17 +125,19 @@ class RfidScanListCreate(generics.ListCreateAPIView):
     permission_classes = [AllowAny]
 
     def create(self, request, *args, **kwargs):
+        print(f"[SCAN POST] Incoming data: {request.data}", flush=True)
         # --- SESSION CHECK ---
         active_session = ScanSession.objects.filter(is_active=True).last()
         if not active_session:
-            # IGNORE SCAN Logic
+            print("[SCAN POST] Ignored — no active session", flush=True)
             return Response({"message": "Scan ignored (No active session)"}, status=status.HTTP_200_OK)
-        
-        # Override any client-provided block with the ACTIVE one
+
         current_block_name = active_session.active_block.name
-        
+        print(f"[SCAN POST] Active session block={current_block_name}", flush=True)
+
         uid = request.data.get("uid")
         if not uid:
+            print("[SCAN POST] Rejected — uid missing", flush=True)
             return Response({"error": "uid is required"}, status=status.HTTP_400_BAD_REQUEST)
 
         # Parse date/time coming from Pi
@@ -182,6 +186,7 @@ class RfidScanListCreate(generics.ListCreateAPIView):
 
         # Always create a NEW row (no instance=instance)
         obj = serializer.save(**save_kwargs)
+        print(f"[SCAN POST] Saved: uid={uid} name={name_val} block={block_obj.name} direction={direction} date={date_obj} time={time_obj}", flush=True)
 
         out = RfidScanSerializer(obj).data
         try:
