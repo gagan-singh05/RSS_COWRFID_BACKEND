@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RSS Dairy | Live Monitor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #0f172a; color: #f8fafc; }
+        .glass { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        .scan-card { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+        .scan-card:hover { transform: translateY(-2px); border-color: rgba(255, 255, 255, 0.2); }
+        @keyframes pulse-slow {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .pulse-slow { animation: pulse-slow 3s infinite; }
+    </style>
+</head>
+<body class="min-h-screen p-4 md:p-8">
+    <div class="max-w-4xl mx-auto space-y-6 md:space-y-8">
+        <!-- Header -->
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <h1 class="text-2xl md:text-3xl font-bold tracking-tight text-white flex items-center gap-3">
+                <span class="text-3xl md:text-4xl">🐄</span> RSS Dairy Monitor
+            </h1>
+            <div id="connection-status" class="flex items-center gap-2 px-3 py-1 rounded-full bg-red-500/10 text-red-400 text-sm font-medium border border-red-500/20 w-fit">
+                <div class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
+                Disconnected
+            </div>
+        </div>
+
+        <!-- Session Controls -->
+        <div class="glass rounded-2xl p-4 md:p-6 shadow-xl ring-1 ring-white/10">
+            <h3 class="text-sm font-bold text-indigo-400 uppercase tracking-wider mb-4">Session Management</h3>
+            <div class="flex flex-col md:flex-row items-end gap-4">
+                <div class="w-full md:flex-1">
+                    <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Active Block</label>
+                    <div class="relative">
+                        <select id="block-select" class="w-full bg-slate-900/50 border border-slate-700/50 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 appearance-none transition-all">
+                            <option value="">Loading blocks...</option>
+                        </select>
+                        <div class="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500">
+                            ⌄
+                        </div>
+                    </div>
+                </div>
+                <div class="flex w-full md:w-auto gap-3">
+                    <button id="btn-start" class="flex-1 md:flex-none bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-3 rounded-xl font-bold transition-all disabled:opacity-30 disabled:cursor-not-allowed shadow-lg shadow-indigo-600/20 active:scale-95">
+                        START
+                    </button>
+                    <button id="btn-stop" class="flex-1 md:flex-none bg-slate-800 hover:bg-slate-700 text-white px-8 py-3 rounded-xl font-bold transition-all disabled:opacity-30 disabled:cursor-not-allowed border border-slate-700 active:scale-95">
+                        STOP
+                    </button>
+                </div>
+            </div>
+            <div id="session-info" class="mt-4 px-4 py-2 bg-slate-900/40 rounded-lg text-sm text-slate-400 border border-slate-800/50">
+                <span class="pulse-slow">Initializing...</span>
+            </div>
+        </div>
+
+        <!-- Live Content -->
+        <div class="space-y-4">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <h2 class="text-xl font-semibold text-white">Live Activity</h2>
+                    <span id="scan-count" class="bg-indigo-500/10 text-indigo-400 text-xs font-bold px-2 py-0.5 rounded-full border border-indigo-500/20">0</span>
+                </div>
+                <button onclick="clearScans()" class="text-xs font-bold text-slate-500 hover:text-white uppercase tracking-widest transition-colors">Clear Logic</button>
+            </div>
+            
+            <div id="scans-list" class="space-y-3 min-h-[400px]">
+                <!-- Scans will appear here -->
+                <div id="empty-state" class="flex flex-col items-center justify-center py-20 text-slate-500 space-y-4 glass rounded-2xl border-dashed border-2 border-slate-800">
+                    <span class="text-4xl opacity-20">📡</span>
+                    <p class="italic">Waiting for incoming RFID scans...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="fixed bottom-8 left-1/2 -translate-x-1/2 px-6 py-3 rounded-xl glass shadow-2xl border border-white/10 text-white font-medium translate-y-24 transition-all duration-500 opacity-0 z-50">
+    </div>
+
+    <script>
+        const API_BASE = 'https://rss-cowrfid-backend.vercel.app/api';
+        const scansList = document.getElementById('scans-list');
+        const emptyState = document.getElementById('empty-state');
+        const blockSelect = document.getElementById('block-select');
+        const btnStart = document.getElementById('btn-start');
+        const btnStop = document.getElementById('btn-stop');
+        const sessionInfo = document.getElementById('session-info');
+        const statusEl = document.getElementById('connection-status');
+        const scanCountEl = document.getElementById('scan-count');
+        const toastEl = document.getElementById('toast');
+
+        let eventSource = null;
+        let scanCount = 0;
+
+        function showToast(msg, isError = false) {
+            toastEl.innerText = msg;
+            toastEl.className = `fixed bottom-8 left-1/2 -translate-x-1/2 px-6 py-3 rounded-xl glass shadow-2xl border transition-all duration-500 z-50 ${isError ? 'border-red-500/50 text-red-200' : 'border-indigo-500/50 text-indigo-100'} translate-y-0 opacity-100`;
+            setTimeout(() => {
+                toastEl.className = toastEl.className.replace('translate-y-0 opacity-100', 'translate-y-24 opacity-0');
+            }, 3000);
+        }
+
+        function clearScans() {
+            scansList.innerHTML = '';
+            scansList.appendChild(emptyState);
+            emptyState.classList.remove('hidden');
+            scanCount = 0;
+            updateCount();
+        }
+
+        function updateCount() {
+            scanCountEl.innerText = scanCount;
+        }
+
+        // Fetch Blocks
+        async function loadBlocks() {
+            try {
+                const res = await fetch(`${API_BASE}/blocks/`);
+                if (!res.ok) throw new Error();
+                const blocks = await res.json();
+                blockSelect.innerHTML = blocks.map(b => `<option value="${b.name}">${b.name}</option>`).join('');
+            } catch (err) {
+                blockSelect.innerHTML = '<option value="">Failed to load blocks</option>';
+            }
+        }
+
+        // Check Session Status
+        async function checkStatus() {
+            try {
+                const res = await fetch(`${API_BASE}/session/`);
+                const data = await res.json();
+                if (data.is_active) {
+                    sessionInfo.innerHTML = `
+                        <div class="flex items-center gap-2">
+                            <span class="flex h-2 w-2 rounded-full bg-green-500"></span>
+                            <span>Currently scanning <strong>Block ${data.block}</strong></span>
+                            <span class="hidden md:inline text-slate-600">|</span>
+                            <span class="hidden md:inline text-slate-500">Started ${new Date(data.start_time).toLocaleTimeString()}</span>
+                        </div>
+                    `;
+                    btnStart.disabled = true;
+                    btnStop.disabled = false;
+                } else {
+                    sessionInfo.innerHTML = `
+                        <div class="flex items-center gap-2">
+                            <span class="flex h-2 w-2 rounded-full bg-slate-600"></span>
+                            <span>System Idle — No active scanning session</span>
+                        </div>
+                    `;
+                    btnStart.disabled = false;
+                    btnStop.disabled = true;
+                }
+            } catch (err) {
+                console.error('Status check failed');
+            }
+        }
+
+        // Start Session
+        btnStart.onclick = async () => {
+            const block = blockSelect.value;
+            if (!block) return showToast('Please select a block first', true);
+            
+            btnStart.disabled = true;
+            btnStart.innerText = 'STARTING...';
+            
+            try {
+                const res = await fetch(`${API_BASE}/session/`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'start', block })
+                });
+                const data = await res.json();
+                showToast(data.message || 'Session started');
+                await checkStatus();
+            } catch (err) {
+                showToast('API Connection Failed', true);
+            } finally {
+                btnStart.innerText = 'START';
+            }
+        };
+
+        // Stop Session
+        btnStop.onclick = async () => {
+            btnStop.disabled = true;
+            btnStop.innerText = 'STOPPING...';
+            
+            try {
+                const res = await fetch(`${API_BASE}/session/`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'stop' })
+                });
+                const data = await res.json();
+                showToast(data.message || 'Session stopped');
+                await checkStatus();
+            } catch (err) {
+                showToast('API Connection Failed', true);
+            } finally {
+                btnStop.innerText = 'STOP';
+            }
+        };
+
+        // SSE Connection
+        function connectStream() {
+            if (eventSource) eventSource.close();
+            
+            eventSource = new EventSource(`${API_BASE}/stream/`);
+            
+            eventSource.onopen = () => {
+                statusEl.innerHTML = '<div class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div> Live Stream Active';
+                statusEl.className = 'flex items-center gap-2 px-3 py-1 rounded-full bg-green-500/10 text-green-400 text-sm font-medium border border-green-500/20 w-fit';
+            };
+
+            eventSource.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    addScan(data);
+                } catch (e) {
+                    // Ignore ping/non-json
+                }
+            };
+
+            eventSource.onerror = () => {
+                statusEl.innerHTML = '<div class="w-2 h-2 rounded-full bg-yellow-500 animate-pulse"></div> Reconnecting...';
+                statusEl.className = 'flex items-center gap-2 px-3 py-1 rounded-full bg-yellow-500/10 text-yellow-400 text-sm font-medium border border-yellow-500/20 w-fit';
+            };
+        }
+
+        function addScan(scan) {
+            emptyState.classList.add('hidden');
+            
+            const isOut = scan.direction === 'OUT';
+            const card = document.createElement('div');
+            card.className = 'glass scan-card rounded-xl p-4 flex items-center justify-between border-l-4 shadow-sm ' + (isOut ? 'border-l-rose-500' : 'border-l-emerald-500');
+            
+            card.innerHTML = `
+                <div class="flex items-center gap-4">
+                    <div class="w-12 h-12 flex items-center justify-center rounded-xl ${isOut ? 'bg-rose-500/10 text-rose-400' : 'bg-emerald-500/10 text-emerald-400'} text-xl border border-white/5">
+                        ${isOut ? '↗️' : '↙️'}
+                    </div>
+                    <div>
+                        <div class="font-bold text-white text-lg">${scan.name || 'Unknown Cow'}</div>
+                        <div class="text-xs text-slate-500 font-mono tracking-tighter uppercase px-1.5 py-0.5 bg-white/5 rounded w-fit border border-white/5">${scan.uid}</div>
+                    </div>
+                </div>
+                <div class="flex flex-col items-end gap-1">
+                    <span class="text-[10px] font-bold uppercase tracking-[0.2em] ${isOut ? 'text-rose-500' : 'text-emerald-500'}">
+                        ${isOut ? 'Leaving Block' : 'Entering Block'}
+                    </span>
+                    <div class="text-sm font-bold text-white tracking-widest">${scan.time}</div>
+                    <div class="text-[10px] text-slate-500 uppercase font-medium">Block ${scan.block}</div>
+                </div>
+            `;
+
+            scansList.prepend(card);
+            scanCount++;
+            updateCount();
+            
+            // Limit to 100 scans in viewport
+            if (scansList.children.length > 101) {
+                scansList.removeChild(scansList.lastChild);
+            }
+        }
+
+        // Init
+        loadBlocks();
+        checkStatus();
+        connectStream();
+
+        // Refresh status periodically every 2 minutes
+        setInterval(checkStatus, 120000);
+    </script>
+</body>
+</html>
